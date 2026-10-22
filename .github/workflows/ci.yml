@@ -68,6 +68,9 @@ jobs:
           echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/fake_creds.json" >> "$GITHUB_ENV"
           echo "GOOGLE_PROJECT=example-project" >> "$GITHUB_ENV"
 
+      - name: terraform fmt check
+        run: terraform fmt -check -recursive -diff
+
       - name: terraform validate (modules + examples)
         run: |
           for d in modules/least-privilege-service-account modules/workload-identity-binding examples/pass examples/fail; do
@@ -81,6 +84,13 @@ jobs:
         run: |
           tfsec examples/pass
           tfsec modules
+
+      - name: tfsec must catch the known-bad bucket config
+        run: |
+          if tfsec examples/fail; then
+            echo "::error::examples/fail was expected to trip tfsec (public bucket/UBLA/encryption) but passed"
+            exit 1
+          fi
 
       - name: Terraform-plan OPA check must catch the known-bad plan
         run: |

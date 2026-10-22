@@ -51,6 +51,10 @@ that plan JSON instead:
 |---|---|
 | `policy/deny_service_account_key.rego` | Any `google_service_account_key` resource, anywhere in the plan (root or nested module) |
 | `policy/deny_privileged_iam_role.rego` | `roles/owner`/`roles/editor` granted via `google_project_iam_member`/`_binding` (or folder/org equivalent), **and** via the authoritative `google_project_iam_policy`/`_folder_/_organization_` resources, whose role grants live inside a JSON-encoded `policy_data` string rather than a flat `role` attribute |
+| `policy/deny_public_iam_principal.rego` | Any role at all - including low-privilege-sounding ones like `roles/viewer` - granted to `allUsers`/`allAuthenticatedUsers`. The privileged-role check only looks at the role name, so a public grant of a "safe" role slipped past it entirely until this policy existed. |
+| `policy/deny_dangerous_custom_role_permissions.rego` | A **custom** role (the thing `least-privilege-service-account` builds) that itself contains a privilege-escalation permission - `resourcemanager.*.setIamPolicy`, `iam.serviceAccounts.actAs`/`getAccessToken`/`signJwt`/`signBlob`/`setIamPolicy`, `iam.serviceAccountKeys.create`. A custom role is not automatically safe just because it isn't `roles/owner`. |
+
+Both of the above came out of an adversarial pass after the first external review: I fed the policies a custom role containing only `resourcemanager.projects.setIamPolicy` and a `roles/viewer` grant to `allUsers`, and both passed clean. Fixed and covered by tests now - see commit history rather than trusting this README alone.
 
 `terraform plan` needs a GCP credential to even start, including in CI where nothing
 real should ever be configured. `.github/workflows/ci.yml` generates a throwaway RSA
@@ -92,10 +96,12 @@ modules/
   least-privilege-service-account/   # custom-role-only service account
   workload-identity-binding/         # Workload Identity binding, no key resource
 policy/
-  common.rego                        # package common - walk()'s the plan tree for every resource
-  deny_service_account_key.rego      # package policies.service_account_key
-  deny_privileged_iam_role.rego      # package policies.privileged_iam_role
-  *_test.rego                        # opa test unit tests, mocked plan JSON
+  common.rego                           # package common - walk()'s the plan tree for every resource
+  deny_service_account_key.rego         # package policies.service_account_key
+  deny_privileged_iam_role.rego         # package policies.privileged_iam_role
+  deny_public_iam_principal.rego        # package policies.public_iam_principal
+  deny_dangerous_custom_role_permissions.rego  # package policies.dangerous_custom_role_permissions
+  *_test.rego                           # opa test unit tests, mocked plan JSON
 examples/
   pass/                               # uses both modules; must pass tfsec and the OPA check
   fail/                               # static key + roles/owner; must fail the OPA check
@@ -105,7 +111,24 @@ examples/
 ## CI
 
 `.github/workflows/ci.yml` installs pinned OPA, conftest, and tfsec binaries (plus
-HashiCorp's official `setup-terraform` action), validates every module and example,
-runs the OPA unit tests, runs tfsec against the known-good example and the modules,
-then generates a real Terraform plan for both examples and asserts the known-bad plan
-fails the OPA check while the known-good plan passes it.
+HashiCorp's official `setup-terraform` action), checks `terraform fmt`, validates
+every module and example, runs the OPA unit tests, runs tfsec against the known-good
+example and the modules, asserts tfsec *does* flag the known-bad example (the bucket
+findings the README above talks about), then generates a real Terraform plan for both
+examples and asserts the known-bad plan fails the OPA check while the known-good plan
+passes it.
+
+`.terraform.lock.hcl` is committed for `examples/pass` and `examples/fail` (they're
+root configurations - HashiCorp's own guidance is to commit lockfiles there) and
+gitignored inside each module directory (reusable child modules don't need their own).
+
+## Scope and known limitations
+
+This repo enforces its rules at the Terraform-plan layer. It does not (and currently
+cannot) stop someone from creating a static key or an overly broad grant through
+`gcloud`, the GCP console, or a different repository's Terraform - that needs an
+org-level control (GCP Organization Policy constraints restricting service-account
+key creation, for example), which is a real GCP resource this repo doesn't define,
+since testing it offline the way everything else here is tested isn't possible
+without a real GCP organization. Worth knowing before treating this as a complete
+guardrail rather than a CI-time gate.

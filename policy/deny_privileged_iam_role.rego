@@ -43,5 +43,5 @@ deny contains msg if {
 	policy := json.unmarshal(rc.values.policy_data)
 	binding := policy.bindings[_]
 	binding.role in privileged_roles
-	msg := sprintf("%s sets an authoritative IAM policy granting privileged role %q via policy_data; use additive google_project_iam_member/_binding with a custom role instead", [rc.address, binding.role])
+	msg := sprintf("%s sets an authoritative IAM policy granting privileged role %q via policy_data; use google_project_iam_member (additive) with a custom role instead - google_project_iam_binding is authoritative for that one role, not additive, so it isn't a safe substitute either", [rc.address, binding.role])
 }
