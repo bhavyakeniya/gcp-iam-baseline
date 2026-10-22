@@ -44,6 +44,30 @@ jobs:
           chmod +x tfsec
           sudo mv tfsec /usr/local/bin/tfsec
 
+      - name: Generate a throwaway, never-real GCP credential for offline plans
+        run: |
+          openssl genrsa -out /tmp/fake_key.pem 2048
+          python3 - <<'PY'
+          import json
+          pk = open("/tmp/fake_key.pem").read()
+          creds = {
+              "type": "service_account",
+              "project_id": "example-project",
+              "private_key_id": "0" * 40,
+              "private_key": pk,
+              "client_email": "fake@example-project.iam.gserviceaccount.com",
+              "client_id": "123456789012345678901",
+              "auth_uri": "https://accounts.google.com/o/oauth2/auth",
+              "token_uri": "https://oauth2.googleapis.com/token",
+              "auth_provider_x509_cert_url": "https://www.googleapis.com/oauth2/v1/certs",
+              "client_x509_cert_url": "https://www.googleapis.com/robot/v1/metadata/x509/fake%40example-project.iam.gserviceaccount.com",
+          }
+          with open("/tmp/fake_creds.json", "w") as f:
+              json.dump(creds, f)
+          PY
+          echo "GOOGLE_APPLICATION_CREDENTIALS=/tmp/fake_creds.json" >> "$GITHUB_ENV"
+          echo "GOOGLE_PROJECT=example-project" >> "$GITHUB_ENV"
+
       - name: terraform validate (modules + examples)
         run: |
           for d in modules/least-privilege-service-account modules/workload-identity-binding examples/pass examples/fail; do

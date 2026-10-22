@@ -50,7 +50,13 @@ that plan JSON instead:
 | Policy | Catches |
 |---|---|
 | `policy/deny_service_account_key.rego` | Any `google_service_account_key` resource, anywhere in the plan (root or nested module) |
-| `policy/deny_privileged_iam_role.rego` | Any `google_project_iam_member`/`_binding` (or folder/org equivalent) granting `roles/owner` or `roles/editor` |
+| `policy/deny_privileged_iam_role.rego` | `roles/owner`/`roles/editor` granted via `google_project_iam_member`/`_binding` (or folder/org equivalent), **and** via the authoritative `google_project_iam_policy`/`_folder_/_organization_` resources, whose role grants live inside a JSON-encoded `policy_data` string rather than a flat `role` attribute |
+
+`terraform plan` needs a GCP credential to even start, including in CI where nothing
+real should ever be configured. `.github/workflows/ci.yml` generates a throwaway RSA
+key and a syntactically-valid-but-fake service-account JSON at runtime (never
+committed, so there's nothing for a secret scanner to flag) purely so the provider
+can produce a plan for brand-new resources with no API calls involved.
 
 tfsec stays in CI for what it's actually good at - bucket exposure, encryption,
 network configuration - and the OPA layer covers the two IAM-specific gaps it misses
