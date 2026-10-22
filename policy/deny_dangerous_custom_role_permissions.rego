@@ -10,7 +10,17 @@ import data.common
 # service-account keys or tokens for another identity). Verified directly:
 # a custom role with only resourcemanager.projects.setIamPolicy produced
 # zero violations before this policy existed.
-
+#
+# This is a curated, explicitly non-exhaustive denylist of permissions that
+# grant IAM/org-policy control or service-account impersonation - not a
+# generated list from GCP's full permission reference. Known gaps include
+# iam.serviceAccounts.getOpenIdToken/implicitDelegation,
+# iam.serviceAccountKeys.upload, iam.roles.create/update,
+# orgpolicy.policy.set, and cloudbuild.builds.create (a build can itself run
+# as a highly-privileged service account). Expanding this against a
+# documented threat model is a reasonable next step; until then, treat a
+# clean result from this policy as "no permission on this specific list",
+# not "no privilege-escalation risk".
 dangerous_permissions := {
 	"resourcemanager.projects.setIamPolicy",
 	"resourcemanager.folders.setIamPolicy",
@@ -18,9 +28,16 @@ dangerous_permissions := {
 	"iam.serviceAccounts.setIamPolicy",
 	"iam.serviceAccounts.actAs",
 	"iam.serviceAccounts.getAccessToken",
+	"iam.serviceAccounts.getOpenIdToken",
+	"iam.serviceAccounts.implicitDelegation",
 	"iam.serviceAccounts.signJwt",
 	"iam.serviceAccounts.signBlob",
 	"iam.serviceAccountKeys.create",
+	"iam.serviceAccountKeys.upload",
+	"iam.roles.create",
+	"iam.roles.update",
+	"orgpolicy.policy.set",
+	"cloudbuild.builds.create",
 }
 
 custom_role_types := {

@@ -3,7 +3,7 @@
 Reusable Terraform modules for a least-privilege, static-key-free GCP IAM baseline,
 backed by two layers of policy-as-code CI gating: [tfsec](https://github.com/aquasecurity/tfsec)
 for general misconfiguration scanning, and a small set of custom [OPA](https://www.openpolicyagent.org/)/Rego
-checks run against `terraform show -json` plan output for the two things tfsec's
+checks run against `terraform show -json` plan output for the IAM-specific gaps tfsec's
 default ruleset doesn't catch.
 
 This is a from-scratch demo repo, not a copy of any employer's codebase. It
@@ -20,8 +20,11 @@ CI-gated IaC security scanning) used in real platform-engineering work I've ship
 
 `examples/pass/` wires both modules together into a realistic usage example.
 `examples/fail/` is a deliberately insecure, hand-written Terraform file (not using
-the modules) that creates a static service-account key and grants `roles/owner`
-directly, so CI has something real to catch.
+the modules) that creates a static service-account key, grants `roles/owner`, grants
+`roles/viewer` to `allUsers`, and defines a custom role containing
+`resourcemanager.projects.setIamPolicy` - one resource per policy in this repo, all in
+one plan, so CI can assert each policy fires independently rather than just checking
+that *something* failed.
 
 ## Why two scanning layers instead of one
 
@@ -44,7 +47,7 @@ created instead of hardcoding a string - is *more* likely to slip past these two
 scanners than lazily-written code. Terraform's own `terraform show -json` plan
 output doesn't have this gap: the provider computes `google_service_account.email`
 deterministically from `account_id` + `project`, so the plan JSON resolves it even
-without any API calls. The `policy/` directory here runs two small OPA checks against
+without any API calls. The `policy/` directory here runs four small OPA checks against
 that plan JSON instead:
 
 | Policy | Catches |
@@ -63,8 +66,9 @@ committed, so there's nothing for a secret scanner to flag) purely so the provid
 can produce a plan for brand-new resources with no API calls involved.
 
 tfsec stays in CI for what it's actually good at - bucket exposure, encryption,
-network configuration - and the OPA layer covers the two IAM-specific gaps it misses
-for this resource-reference pattern.
+network configuration - and the OPA layer covers the IAM-specific gaps it misses for
+this resource-reference pattern, plus checks (public principals, dangerous custom-role
+permissions) that are entirely outside tfsec's scope regardless of the reference issue.
 
 ## Prerequisites
 
@@ -103,20 +107,28 @@ policy/
   deny_dangerous_custom_role_permissions.rego  # package policies.dangerous_custom_role_permissions
   *_test.rego                           # opa test unit tests, mocked plan JSON
 examples/
-  pass/                               # uses both modules; must pass tfsec and the OPA check
-  fail/                               # static key + roles/owner; must fail the OPA check
+  pass/                               # uses both modules; must pass tfsec and every OPA policy
+  fail/                               # one resource per policy; each must fail independently
+scripts/assert_policy_coverage.py     # asserts exact rule coverage, not just a non-zero exit
 .github/workflows/ci.yml              # terraform validate, opa test, tfsec, plan-based OPA check
 ```
 
 ## CI
 
-`.github/workflows/ci.yml` installs pinned OPA, conftest, and tfsec binaries (plus
-HashiCorp's official `setup-terraform` action), checks `terraform fmt`, validates
-every module and example, runs the OPA unit tests, runs tfsec against the known-good
+`.github/workflows/ci.yml` installs checksum-verified OPA, conftest, and tfsec
+binaries and SHA-pinned actions (plus HashiCorp's official `setup-terraform` action),
+runs with `permissions: contents: read`, checks `terraform fmt`, validates every
+module and example, runs the OPA unit tests, runs tfsec against the known-good
 example and the modules, asserts tfsec *does* flag the known-bad example (the bucket
-findings the README above talks about), then generates a real Terraform plan for both
-examples and asserts the known-bad plan fails the OPA check while the known-good plan
-passes it.
+findings this README talks about above), then generates a real Terraform plan for
+both examples and runs `scripts/assert_policy_coverage.py` against them.
+
+That script exists because `if conftest test ...; then exit 1; fi` only proves *some*
+rule fired - a silent regression in one policy can hide behind a sibling policy still
+firing on the same combined fixture, and the script would have let it. It instead
+parses conftest's structured JSON output and asserts each of the four policy packages
+by name reported a violation on the known-bad plan, and that the known-good plan has
+zero violations from any package.
 
 `.terraform.lock.hcl` is committed for `examples/pass` and `examples/fail` (they're
 root configurations - HashiCorp's own guidance is to commit lockfiles there) and
@@ -124,11 +136,16 @@ gitignored inside each module directory (reusable child modules don't need their
 
 ## Scope and known limitations
 
-This repo enforces its rules at the Terraform-plan layer. It does not (and currently
-cannot) stop someone from creating a static key or an overly broad grant through
-`gcloud`, the GCP console, or a different repository's Terraform - that needs an
-org-level control (GCP Organization Policy constraints restricting service-account
-key creation, for example), which is a real GCP resource this repo doesn't define,
-since testing it offline the way everything else here is tested isn't possible
-without a real GCP organization. Worth knowing before treating this as a complete
-guardrail rather than a CI-time gate.
+This repo enforces its rules at the Terraform-plan layer. It does not stop someone
+from creating a static key or an overly broad grant through `gcloud`, the GCP
+console, or a different repository's Terraform - that needs an org-level control
+(a GCP Organization Policy constraint restricting service-account key creation, for
+example), which this repo doesn't currently define. An earlier version of this
+section claimed that was untestable offline; that was wrong and got corrected after
+a review pointed it out - Terraform's own `mock_provider` test framework (stable
+since Terraform 1.6+, this repo already requires >= 1.8.0) can exercise an
+org-policy resource's planned configuration with no real GCP org or credentials,
+the same way everything else in this repo is tested. What genuinely can't be tested
+offline is whether a *real* org actually enforces the constraint - the Terraform
+code itself could be. Not yet built here; worth knowing before treating this repo as
+a complete guardrail rather than a CI-time gate.

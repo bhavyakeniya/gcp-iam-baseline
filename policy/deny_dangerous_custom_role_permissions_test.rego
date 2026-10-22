@@ -18,6 +18,24 @@ test_service_account_key_create_permission_denied if {
 	count(deny) > 0 with input as mock_input
 }
 
+test_org_policy_set_permission_denied if {
+	mock_input := {"planned_values": {"root_module": {"resources": [{
+		"address": "google_project_iam_custom_role.policy_setter",
+		"type": "google_project_iam_custom_role",
+		"values": {"permissions": ["orgpolicy.policy.set"]},
+	}]}}}
+	count(deny) > 0 with input as mock_input
+}
+
+test_service_account_key_upload_permission_denied if {
+	mock_input := {"planned_values": {"root_module": {"resources": [{
+		"address": "google_project_iam_custom_role.key_uploader",
+		"type": "google_project_iam_custom_role",
+		"values": {"permissions": ["iam.serviceAccountKeys.upload"]},
+	}]}}}
+	count(deny) > 0 with input as mock_input
+}
+
 test_benign_permissions_allowed if {
 	mock_input := {"planned_values": {"root_module": {"resources": [{
 		"address": "google_project_iam_custom_role.reader",

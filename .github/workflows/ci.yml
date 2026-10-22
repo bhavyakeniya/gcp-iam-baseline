@@ -5,42 +5,52 @@ on:
     branches: [main]
   pull_request:
 
+permissions:
+  contents: read
+
 env:
   OPA_VERSION: "1.21.1"
+  OPA_SHA256: "668506eb17a2eaa1fce6cc0d1f42ef85125d4ac5bda5fc74d1152d0c77145031"
   CONFTEST_VERSION: "0.71.1"
+  CONFTEST_SHA256: "c3f6b2a753bd56e377a1e51a95ae3e057f926f2e9139f7d5b5dfbbaf810f7985"
   TFSEC_VERSION: "1.28.14"
+  TFSEC_SHA256: "329ae7f67f2f1813ebe08de498719ea7003c75d3ca24bb0b038369062508008e"
   TERRAFORM_VERSION: "1.8.1"
 
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - uses: hashicorp/setup-terraform@v3
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_version: ${{ env.TERRAFORM_VERSION }}
           terraform_wrapper: false
 
-      - name: Install OPA
+      - name: Install OPA (checksum-verified)
         run: |
           curl -fsSL -o opa \
             "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static"
+          echo "${OPA_SHA256}  opa" | sha256sum -c -
           chmod +x opa
           sudo mv opa /usr/local/bin/opa
 
-      - name: Install conftest
+      - name: Install conftest (checksum-verified)
         run: |
           curl -fsSL -o conftest.tar.gz \
             "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          echo "${CONFTEST_SHA256}  conftest.tar.gz" | sha256sum -c -
           tar -xzf conftest.tar.gz conftest
           chmod +x conftest
           sudo mv conftest /usr/local/bin/conftest
 
-      - name: Install tfsec
+      - name: Install tfsec (checksum-verified)
         run: |
-          curl -fsSL -o tfsec \
-            "https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-linux-amd64"
+          curl -fsSL -o tfsec.tar.gz \
+            "https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec_${TFSEC_VERSION}_linux_amd64.tar.gz"
+          echo "${TFSEC_SHA256}  tfsec.tar.gz" | sha256sum -c -
+          tar -xzf tfsec.tar.gz tfsec
           chmod +x tfsec
           sudo mv tfsec /usr/local/bin/tfsec
 
@@ -92,19 +102,16 @@ jobs:
             exit 1
           fi
 
-      - name: Terraform-plan OPA check must catch the known-bad plan
+      - name: Generate plans, then assert every policy fires independently
         run: |
-          cd examples/fail
-          terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
-          if conftest test --all-namespaces tfplan.json --policy ../../policy; then
-            echo "::error::examples/fail plan was expected to violate the IAM policies but passed"
-            exit 1
-          fi
-
-      - name: Terraform-plan OPA check must pass the known-good plan
-        run: |
-          cd examples/pass
-          terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
-          conftest test --all-namespaces tfplan.json --policy ../../policy
+          for d in examples/fail examples/pass; do
+            (cd "$d" && terraform plan -out=tfplan.binary && terraform show -json tfplan.binary > tfplan.json)
+          done
+          python3 scripts/assert_policy_coverage.py \
+            --fail-plan examples/fail/tfplan.json \
+            --pass-plan examples/pass/tfplan.json \
+            --policy-dir policy \
+            --expect-rule policies.service_account_key \
+            --expect-rule policies.privileged_iam_role \
+            --expect-rule policies.public_iam_principal \
+            --expect-rule policies.dangerous_custom_role_permissions

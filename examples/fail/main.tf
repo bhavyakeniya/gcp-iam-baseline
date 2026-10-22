@@ -43,3 +43,16 @@ resource "google_storage_bucket_iam_member" "public_access" {
   role   = "roles/storage.objectViewer"
   member = "allUsers"
 }
+
+resource "google_project_iam_member" "public_viewer" {
+  project = var.project_id
+  role    = "roles/viewer"
+  member  = "allUsers"
+}
+
+resource "google_project_iam_custom_role" "escalation_role" {
+  project     = var.project_id
+  role_id     = "legacyEscalationRole"
+  title       = "Legacy escalation role"
+  permissions = ["resourcemanager.projects.setIamPolicy"]
+}
