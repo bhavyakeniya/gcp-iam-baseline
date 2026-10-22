@@ -54,7 +54,7 @@ that plan JSON instead:
 |---|---|
 | `policy/deny_service_account_key.rego` | Any `google_service_account_key` resource, anywhere in the plan (root or nested module) |
 | `policy/deny_privileged_iam_role.rego` | `roles/owner`/`roles/editor` granted via `google_project_iam_member`/`_binding` (or folder/org equivalent), **and** via the authoritative `google_project_iam_policy`/`_folder_/_organization_` resources, whose role grants live inside a JSON-encoded `policy_data` string rather than a flat `role` attribute |
-| `policy/deny_public_iam_principal.rego` | Any role at all - including low-privilege-sounding ones like `roles/viewer` - granted to `allUsers`/`allAuthenticatedUsers`. The privileged-role check only looks at the role name, so a public grant of a "safe" role slipped past it entirely until this policy existed. |
+| `policy/deny_public_iam_principal.rego` | Any role at all - including low-privilege-sounding ones like `roles/viewer` - granted to `allUsers`/`allAuthenticatedUsers` through **project/folder/organization-level** IAM (`_iam_member`/`_iam_binding`/the authoritative `_iam_policy`). The privileged-role check only looks at the role name, so a public grant of a "safe" role slipped past it entirely until this policy existed. Resource-level public exposure (e.g. a public storage bucket) is a different resource type and is handled separately by tfsec, not this policy. |
 | `policy/deny_dangerous_custom_role_permissions.rego` | A **custom** role (the thing `least-privilege-service-account` builds) that itself contains a privilege-escalation permission - `resourcemanager.*.setIamPolicy`, `iam.serviceAccounts.actAs`/`getAccessToken`/`signJwt`/`signBlob`/`setIamPolicy`, `iam.serviceAccountKeys.create`. A custom role is not automatically safe just because it isn't `roles/owner`. |
 
 Both of the above came out of an adversarial pass after the first external review: I fed the policies a custom role containing only `resourcemanager.projects.setIamPolicy` and a `roles/viewer` grant to `allUsers`, and both passed clean. Fixed and covered by tests now - see commit history rather than trusting this README alone.
@@ -142,9 +142,10 @@ console, or a different repository's Terraform - that needs an org-level control
 (a GCP Organization Policy constraint restricting service-account key creation, for
 example), which this repo doesn't currently define. An earlier version of this
 section claimed that was untestable offline; that was wrong and got corrected after
-a review pointed it out - Terraform's own `mock_provider` test framework (stable
-since Terraform 1.6+, this repo already requires >= 1.8.0) can exercise an
-org-policy resource's planned configuration with no real GCP org or credentials,
+a review pointed it out - Terraform's native test framework shipped in 1.6, and
+`mock_provider` specifically landed in 1.7 (this repo already requires >= 1.8.0,
+so both are available). It can exercise an org-policy resource's planned
+configuration with no real GCP org or credentials,
 the same way everything else in this repo is tested. What genuinely can't be tested
 offline is whether a *real* org actually enforces the constraint - the Terraform
 code itself could be. Not yet built here; worth knowing before treating this repo as

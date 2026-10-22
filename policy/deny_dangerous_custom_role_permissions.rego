@@ -13,14 +13,16 @@ import data.common
 #
 # This is a curated, explicitly non-exhaustive denylist of permissions that
 # grant IAM/org-policy control or service-account impersonation - not a
-# generated list from GCP's full permission reference. Known gaps include
-# iam.serviceAccounts.getOpenIdToken/implicitDelegation,
-# iam.serviceAccountKeys.upload, iam.roles.create/update,
-# orgpolicy.policy.set, and cloudbuild.builds.create (a build can itself run
-# as a highly-privileged service account). Expanding this against a
+# generated list from GCP's full permission reference. There will be
+# permissions in the same risk class (other impersonation grants, other
+# policy-control APIs, build/deploy permissions that run as a privileged
+# service account) that aren't on this list yet. Expanding it against a
 # documented threat model is a reasonable next step; until then, treat a
 # clean result from this policy as "no permission on this specific list",
-# not "no privilege-escalation risk".
+# not "no privilege-escalation risk". Keep this comment generic rather than
+# naming specific missing permissions - the moment a named gap gets added
+# to the set below, the comment above goes stale exactly the way it just
+# did.
 dangerous_permissions := {
 	"resourcemanager.projects.setIamPolicy",
 	"resourcemanager.folders.setIamPolicy",
