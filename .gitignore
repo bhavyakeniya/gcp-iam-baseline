@@ -1,0 +1,10 @@
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.*
+tfplan.binary
+tfplan.json
+*.tar.gz
+conftest
+opa
+tfsec

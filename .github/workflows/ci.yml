@@ -1,0 +1,76 @@
+name: policy-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+env:
+  OPA_VERSION: "1.21.1"
+  CONFTEST_VERSION: "0.71.1"
+  TFSEC_VERSION: "1.28.14"
+  TERRAFORM_VERSION: "1.8.1"
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: ${{ env.TERRAFORM_VERSION }}
+          terraform_wrapper: false
+
+      - name: Install OPA
+        run: |
+          curl -fsSL -o opa \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static"
+          chmod +x opa
+          sudo mv opa /usr/local/bin/opa
+
+      - name: Install conftest
+        run: |
+          curl -fsSL -o conftest.tar.gz \
+            "https://github.com/open-policy-agent/conftest/releases/download/v${CONFTEST_VERSION}/conftest_${CONFTEST_VERSION}_Linux_x86_64.tar.gz"
+          tar -xzf conftest.tar.gz conftest
+          chmod +x conftest
+          sudo mv conftest /usr/local/bin/conftest
+
+      - name: Install tfsec
+        run: |
+          curl -fsSL -o tfsec \
+            "https://github.com/aquasecurity/tfsec/releases/download/v${TFSEC_VERSION}/tfsec-linux-amd64"
+          chmod +x tfsec
+          sudo mv tfsec /usr/local/bin/tfsec
+
+      - name: terraform validate (modules + examples)
+        run: |
+          for d in modules/least-privilege-service-account modules/workload-identity-binding examples/pass examples/fail; do
+            (cd "$d" && terraform init -backend=false -input=false && terraform validate)
+          done
+
+      - name: Unit test every OPA policy
+        run: opa test policy/ -v
+
+      - name: tfsec scan (general misconfig - bucket/network/encryption)
+        run: |
+          tfsec examples/pass
+          tfsec modules
+
+      - name: Terraform-plan OPA check must catch the known-bad plan
+        run: |
+          cd examples/fail
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > tfplan.json
+          if conftest test --all-namespaces tfplan.json --policy ../../policy; then
+            echo "::error::examples/fail plan was expected to violate the IAM policies but passed"
+            exit 1
+          fi
+
+      - name: Terraform-plan OPA check must pass the known-good plan
+        run: |
+          cd examples/pass
+          terraform plan -out=tfplan.binary
+          terraform show -json tfplan.binary > tfplan.json
+          conftest test --all-namespaces tfplan.json --policy ../../policy
