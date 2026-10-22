@@ -31,6 +31,12 @@ authoritative_iam_policy_types := {
 # this is why Google's own provider docs recommend _iam_member/_iam_binding
 # instead. Its role grants live inside a JSON-encoded policy_data string
 # rather than a flat `role` attribute, so it needs its own decode step.
+#
+# Known limitation: json.unmarshal on a malformed policy_data string makes
+# this rule undefined rather than denying - verified directly (see commit
+# history). In practice policy_data always comes from data.google_iam_policy
+# or jsonencode(), both of which only ever produce valid JSON, so this is a
+# fail-open edge case with low realistic risk, not a fail-closed guarantee.
 deny contains msg if {
 	rc := common.all_planned_resources[_]
 	rc.type in authoritative_iam_policy_types
